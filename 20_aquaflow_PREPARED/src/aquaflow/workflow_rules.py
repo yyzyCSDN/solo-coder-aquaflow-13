@@ -9,6 +9,7 @@ from .booster.failover import Unit, choose as choose_boosters
 from .chemicals.inventory import Lot, active_mass
 from .flush.plan import Hydrant, waves
 from .incidents.escalation import Incident, Rule, overdue
+from .lab.coldchain import Event as ColdChainEvent, Policy, releasable, replay as replay_cold_chain, violations
 from .lab.custody import Event, validate as validate_custody
 from .lab.revisions import Result, current
 from .lab.scheduling import Collector, Req, assign
@@ -76,6 +77,16 @@ def evaluate(name: str, p: dict[str, Any]) -> dict[str, Any]:
         events = [Event(int(x["seq"]), str(x["src"]), str(x["dst"]), _dt(x["at"]), str(x["seal"])) for x in p["events"]]
         end = validate_custody(str(p["origin"]), events)
         return {"decision": "accept", "value": end, "evidence": {"events": len(events)}}
+    if name == "cold_chain":
+        pol = p["policy"]
+        policy = Policy(timedelta(hours=float(pol["transit_hours"])), timedelta(hours=float(pol["preservation_hours"])), float(pol["temp_low"]), float(pol["temp_high"]))
+        events = [ColdChainEvent(int(x["seq"]), str(x["kind"]), _dt(x["at"]), str(x.get("actor", "")), str(x.get("dst", "")), str(x.get("seal", "")), float(x["celsius"]) if x.get("celsius") is not None else None, str(x.get("reason", "")), str(x.get("flag", ""))) for x in p["events"]]
+        chain = replay_cold_chain(str(p["sample"]), policy, events)
+        at = _dt(p["at"]) if p.get("at") else chain.updated_at
+        if at is None:
+            raise ValueError("cold_chain requires at when no events are given")
+        flags = violations(chain, at)
+        return {"decision": "release" if releasable(chain, at) else "hold", "value": sorted(flags), "evidence": {"state": chain.state, "version": chain.version, "exceptions": len(chain.exceptions), "custodian": chain.custodian}}
     if name == "collector_schedule":
         requests = [Req(str(x["site"]), _dt(x["earliest"]), _dt(x["latest"]), int(x["minutes"]), bool(x["certified"])) for x in p["requests"]]
         people = [Collector(str(x["name"]), bool(x["certified"]), _dt(x["start"]), _dt(x["end"])) for x in p["collectors"]]

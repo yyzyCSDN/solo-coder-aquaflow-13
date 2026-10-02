@@ -28,6 +28,7 @@ _REQUIRED: dict[str, tuple[str, ...]] = {
     "pump_dispatch": ("pumps", "history", "required", "max_kw"),
     "booster_failover": ("units", "required", "failed"),
     "custody_chain": ("origin", "events"),
+    "cold_chain": ("sample", "policy", "events"),
     "collector_schedule": ("requests", "collectors"),
     "lab_revision": ("results", "sample", "analyte"),
     "meter_balance": ("inputs", "outputs", "known_loss"),
