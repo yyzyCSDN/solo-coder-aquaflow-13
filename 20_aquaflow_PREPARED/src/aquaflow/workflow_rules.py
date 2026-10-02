@@ -10,6 +10,15 @@ from .chemicals.inventory import Lot, active_mass
 from .flush.plan import Hydrant, waves
 from .incidents.escalation import Incident, Rule, overdue
 from .lab.custody import Event, validate as validate_custody
+from .lab.cold_chain import (
+    Handoff as ColdHandoff,
+    Received as ColdReceived,
+    ReviewException as ColdReviewException,
+    SampleCollected as ColdSampleCollected,
+    TemperatureRecorded as ColdTemperature,
+    decide as cold_decide,
+    replay as cold_replay,
+)
 from .lab.revisions import Result, current
 from .lab.scheduling import Collector, Req, assign
 from .leak.localize import Signal, rank
@@ -76,6 +85,48 @@ def evaluate(name: str, p: dict[str, Any]) -> dict[str, Any]:
         events = [Event(int(x["seq"]), str(x["src"]), str(x["dst"]), _dt(x["at"]), str(x["seal"])) for x in p["events"]]
         end = validate_custody(str(p["origin"]), events)
         return {"decision": "accept", "value": end, "evidence": {"events": len(events)}}
+    if name == "cold_chain_release":
+        s = p["sample"]
+        collected = ColdSampleCollected(
+            str(s["id"]),
+            _dt(s["collected_at"]),
+            float(s["temp_min_c"]),
+            float(s["temp_max_c"]),
+            float(s["holding_minutes"]),
+            str(s["lab"]),
+            str(s["collector"]),
+        )
+        log = []
+        for e in p["events"]:
+            kind = str(e["type"])
+            if kind == "handoff":
+                log.append(ColdHandoff(str(e["sample"]), int(e["seq"]), str(e["src"]), str(e["dst"]), _dt(e["at"]), str(e["seal"])))
+            elif kind == "temperature":
+                log.append(ColdTemperature(str(e["sample"]), _dt(e["at"]), float(e["celsius"]), str(e.get("recorded_by", ""))))
+            elif kind == "received":
+                log.append(ColdReceived(str(e["sample"]), _dt(e["at"]), bool(e.get("accepted", True)), str(e.get("by", "")), str(e.get("note", ""))))
+            elif kind == "exception":
+                log.append(ColdReviewException(str(e["sample"]), _dt(e["at"]), str(e["reviewer"]), str(e["reason"]), tuple(str(c) for c in e.get("codes", ()))))
+            else:
+                raise ValueError("unknown cold-chain event type: " + kind)
+        state = cold_replay(collected, log)
+        decision = cold_decide(state)
+        return {
+            "decision": "release" if decision.releaseable else "block",
+            "value": decision.releaseable,
+            "evidence": {
+                "hard_blocks": list(decision.hard_blocks),
+                "open_deviations": list(decision.open_deviations),
+                "resolved_deviations": list(decision.resolved_deviations),
+                "sla_breaches": list(decision.sla_breaches),
+                "holding_breached": decision.holding_breached,
+                "holding_deadline": decision.holding_deadline.isoformat(),
+                "received_at": decision.received_at.isoformat() if decision.received_at else None,
+                "temperature_readings": len(state.temperatures),
+                "exceptions": len(state.exceptions),
+                "events": len(log),
+            },
+        }
     if name == "collector_schedule":
         requests = [Req(str(x["site"]), _dt(x["earliest"]), _dt(x["latest"]), int(x["minutes"]), bool(x["certified"])) for x in p["requests"]]
         people = [Collector(str(x["name"]), bool(x["certified"]), _dt(x["start"]), _dt(x["end"])) for x in p["collectors"]]

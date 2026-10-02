@@ -11,3 +11,5 @@ class AquaFlowService:
     def water_balance(self,ins,outs,known_loss):return balance(ins,outs,known_loss)
     def leak_rank(self,rows):return rank(rows)
     def run_workflow(self,name,payload,received_at=None):return self.workflows.run(name,payload,received_at)
+    def cold_chain_release(self,sample,events,received_at=None):
+        return self.workflows.run("cold_chain_release",{"sample":sample,"events":events},received_at)
